@@ -4,7 +4,9 @@
 #include "domain/worker/audio_decoder/audio_decoder_events.hpp"
 
 #include <cassert>
+#include <algorithm>
 #include <exception>
+#include <limits>
 #include <optional>
 #include <string>
 #include <utility>
@@ -35,6 +37,111 @@ AudioDecoderBackendError backend_exception(AudioDecoderBackendOperation operatio
         .native_code = 0,
         .message = std::move(message),
     };
+}
+
+std::optional<std::size_t> bytes_per_sample(
+    contracts::media::AudioSampleFormat format) noexcept {
+    using contracts::media::AudioSampleFormat;
+    switch (format) {
+    case AudioSampleFormat::U8:
+        return 1;
+    case AudioSampleFormat::S16:
+        return 2;
+    case AudioSampleFormat::S32:
+    case AudioSampleFormat::F32:
+        return 4;
+    case AudioSampleFormat::S64:
+    case AudioSampleFormat::F64:
+        return 8;
+    case AudioSampleFormat::Unknown:
+        return std::nullopt;
+    }
+    return std::nullopt;
+}
+
+std::uint64_t positive_pts_delta(std::int64_t target, std::int64_t start) noexcept {
+    if (start >= target) {
+        return 0;
+    }
+    if (start >= 0) {
+        return static_cast<std::uint64_t>(target - start);
+    }
+    const auto magnitude = static_cast<std::uint64_t>(-(start + 1)) + 1;
+    const auto positive_target = static_cast<std::uint64_t>(target);
+    if (magnitude > std::numeric_limits<std::uint64_t>::max() - positive_target) {
+        return std::numeric_limits<std::uint64_t>::max();
+    }
+    return magnitude + positive_target;
+}
+
+std::uint64_t samples_to_reach(std::int64_t start,
+                               std::int64_t target,
+                               std::uint32_t sample_rate) noexcept {
+    constexpr std::uint64_t kMicrosPerSecond = 1'000'000;
+    const auto delta = positive_pts_delta(target, start);
+    const auto whole_seconds = delta / kMicrosPerSecond;
+    const auto remainder = delta % kMicrosPerSecond;
+    if (whole_seconds > std::numeric_limits<std::uint64_t>::max() / sample_rate) {
+        return std::numeric_limits<std::uint64_t>::max();
+    }
+    const auto whole_samples = whole_seconds * sample_rate;
+    const auto partial_numerator = remainder * sample_rate;
+    const auto partial_samples = partial_numerator / kMicrosPerSecond +
+                                 (partial_numerator % kMicrosPerSecond != 0 ? 1 : 0);
+    if (whole_samples > std::numeric_limits<std::uint64_t>::max() - partial_samples) {
+        return std::numeric_limits<std::uint64_t>::max();
+    }
+    return whole_samples + partial_samples;
+}
+
+bool trim_audio_to_target(contracts::media::DecodedAudio& frame,
+                          std::int64_t target_pts_us) noexcept {
+    if (!frame.pts_us || frame.format.sample_rate == 0 || frame.format.channels == 0) {
+        return false;
+    }
+    if (*frame.pts_us >= target_pts_us) {
+        return true;
+    }
+
+    const auto sample_bytes = bytes_per_sample(frame.format.sample_format);
+    if (!sample_bytes) {
+        return false;
+    }
+    const auto drop_samples = samples_to_reach(*frame.pts_us,
+                                               target_pts_us,
+                                               frame.format.sample_rate);
+    if (drop_samples >= frame.samples_per_channel) {
+        return false;
+    }
+
+    const std::size_t expected_planes = frame.format.planar ? frame.format.channels : 1U;
+    const std::uint64_t bytes_per_channel_sample = frame.format.planar
+        ? *sample_bytes
+        : static_cast<std::uint64_t>(*sample_bytes) * frame.format.channels;
+    if (frame.planes.size() != expected_planes ||
+        drop_samples > std::numeric_limits<std::size_t>::max() / bytes_per_channel_sample) {
+        return false;
+    }
+    const auto drop_bytes = static_cast<std::size_t>(drop_samples * bytes_per_channel_sample);
+    for (auto& plane : frame.planes) {
+        if (drop_bytes > plane.size()) {
+            return false;
+        }
+    }
+    for (auto& plane : frame.planes) {
+        plane.erase(plane.begin(), plane.begin() + static_cast<std::ptrdiff_t>(drop_bytes));
+    }
+    frame.samples_per_channel -= static_cast<std::uint32_t>(drop_samples);
+    const auto offset_us = drop_samples * 1'000'000ULL / frame.format.sample_rate;
+    if (offset_us <= static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) &&
+        *frame.pts_us <= std::numeric_limits<std::int64_t>::max() -
+                             static_cast<std::int64_t>(offset_us)) {
+        frame.pts_us = std::max(target_pts_us,
+                                *frame.pts_us + static_cast<std::int64_t>(offset_us));
+    } else {
+        frame.pts_us = target_pts_us;
+    }
+    return true;
 }
 
 } // namespace
@@ -205,6 +312,8 @@ void DefaultAudioDecoder::process_command(ConfigureCommand& command) noexcept {
     std::lock_guard lock(mutex_);
     // 建立新会话上下文：捕获当前世代，清空上一会话残留。
     active_generation_ = generation_->current();
+    seek_target_pts_us_ = generation_->seek_target_for(active_generation_);
+    seek_gate_open_ = !seek_target_pts_us_.has_value();
     pending_outputs_.clear();
     input_exhausted_ = false;
     input_not_empty_hint_ = true;
@@ -232,6 +341,8 @@ void DefaultAudioDecoder::process_command(UnconfigureCommand& command) noexcept 
     std::lock_guard lock(mutex_);
     pending_outputs_.clear();
     active_generation_ = 0;
+    seek_target_pts_us_.reset();
+    seek_gate_open_ = true;
     input_exhausted_ = false;
     input_not_empty_hint_ = false;
     output_not_full_hint_ = false;
@@ -261,6 +372,8 @@ bool DefaultAudioDecoder::should_process_data_locked() const noexcept {
 }
 
 void DefaultAudioDecoder::adopt_generation_if_needed(Generation::Value current_generation) noexcept {
+    const auto seek_target = generation_ ? generation_->seek_target_for(current_generation)
+                                         : std::nullopt;
     bool generation_changed = false;
     {
         std::lock_guard lock(mutex_);
@@ -271,6 +384,8 @@ void DefaultAudioDecoder::adopt_generation_if_needed(Generation::Value current_g
         pending_outputs_.clear();
         input_exhausted_ = false;
         active_generation_ = current_generation;
+        seek_target_pts_us_ = seek_target;
+        seek_gate_open_ = !seek_target.has_value();
         input_not_empty_hint_ = true;
         output_not_full_hint_ = false;
         generation_changed = true;
@@ -445,11 +560,18 @@ void DefaultAudioDecoder::store_decoded_outputs(
     std::lock_guard lock(mutex_);
     if (worker_state_ == WorkerState::ShuttingDown ||
         session_state_ != SessionState::Configured ||
-        active_generation_ != generation) {
+        active_generation_ != generation ||
+        (generation_ && generation_->current() != generation)) {
         return;
     }
 
     for (auto& frame : decoded) {
+        if (!seek_gate_open_) {
+            if (!trim_audio_to_target(frame, *seek_target_pts_us_)) {
+                continue;
+            }
+            seek_gate_open_ = true;
+        }
         pending_outputs_.emplace_back(std::in_place_type<AudioFrame>, std::move(frame), generation);
     }
     if (append_end_of_input) {

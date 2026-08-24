@@ -399,6 +399,20 @@ TEST(ApiLayerTest, SeekDelegatesToDemuxerAndPreservesPlaybackState) {
     EXPECT_TRUE(layer.stop());
 }
 
+TEST(ApiLayerTest, AcceptsAccurateSeekMode) {
+    FakePipeline pipeline;
+    ApiLayer layer = make_layer(pipeline);
+    ASSERT_TRUE(layer.start());
+
+    CommandResult result;
+    ASSERT_EQ(layer.await(layer.open("movie.mp4"), result), SEMI_OK);
+    const auto seek = layer.seek(1'500'000, domain::SeekMode::Accurate);
+    ASSERT_NE(seek, 0U);
+    EXPECT_EQ(layer.await(seek, result), SEMI_OK);
+    EXPECT_EQ(pipeline.demuxer->last_seek_mode, domain::SeekMode::Accurate);
+    EXPECT_TRUE(layer.stop());
+}
+
 TEST(ApiLayerTest, SeekMapsBackendFailureToInvalidResource) {
     FakePipeline pipeline;
     pipeline.demuxer->fail_seek = true;

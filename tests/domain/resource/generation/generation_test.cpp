@@ -25,6 +25,22 @@ TEST(Generation, BumpIncrements) {
     EXPECT_EQ(g.current(), 2u);
 }
 
+TEST(Generation, AssociatesAccurateSeekTargetWithOnlyItsGeneration) {
+    Generation generation;
+
+    const auto accurate = generation.bump(1'234'567);
+    const auto snapshot = generation.snapshot();
+    EXPECT_EQ(snapshot.value, accurate);
+    EXPECT_EQ(snapshot.seek_target_pts_us, 1'234'567);
+    EXPECT_EQ(generation.seek_target_for(accurate), 1'234'567);
+    EXPECT_FALSE(generation.seek_target_for(accurate - 1).has_value());
+
+    const auto ordinary = generation.bump();
+    EXPECT_EQ(ordinary, accurate + 1);
+    EXPECT_FALSE(generation.seek_target_for(ordinary).has_value());
+    EXPECT_FALSE(generation.seek_target_for(accurate).has_value());
+}
+
 TEST(Generation, BumpPublishesTheNewValue) {
     auto notifier = std::make_shared<semi::infra::DefaultNotifier>();
     Generation generation(notifier);
@@ -52,6 +68,6 @@ TEST(Generation, ConcurrentBumpsAreAtomic) {
         });
     }
     for (auto& t : threads) t.join();
-    // 无锁 bump 必须无丢失：最终值 == 总 bump 次数。
+    // 并发 bump 必须无丢失：最终值 == 总 bump 次数。
     EXPECT_EQ(g.current(), static_cast<uint32_t>(kThreads * kBumpsPerThread));
 }

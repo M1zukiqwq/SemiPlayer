@@ -15,17 +15,17 @@
 [README](../README.md)、[architecture.md](architecture.md) 和
 [performance.md](performance.md)，不在路线图中重复维护。
 
-## 近期：精确 Seek
+## 近期：精准 Seek 验收
 
-当前只支持前一个或后一个关键帧定位。精确 Seek 需要在 Demuxer 完成关键帧定位后：
+`Accurate` 模式的主链路已经实现：
 
 - VideoDecoder 丢弃目标 PTS 之前的解码帧；
-- AudioDecoder/AudioResampler 裁剪目标时间之前的 PCM；
-- 重新建立 AudioPlaybackClock 锚点；
-- 保持 Generation 对旧管道数据的隔离职责不变。
+- AudioDecoder 按 sample 裁剪目标时间之前的 PCM；
+- AudioResampler 按实际输出 sample 数连续推进 PTS；
+- target PTS 与 Generation 绑定，旧数据隔离和 backend reset 仍沿用世代机制。
 
-验收标准：对固定测试媒体请求任意时间点，首个视频帧和首段音频落在定义的误差范围
-内，并覆盖播放态、暂停态和连续 Seek。
+下一步验收：对固定测试媒体请求任意时间点，首个视频帧和首段音频落在定义的误差范围
+内，并补齐播放态、暂停态、连续 Seek、长 GOP、缺失 PTS 和纯音频媒体场景。
 
 ## 近期：展示收尾
 

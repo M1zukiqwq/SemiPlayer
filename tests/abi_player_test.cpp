@@ -145,11 +145,14 @@ TEST(SemiPlayerAbiTest, RunsSeekPauseResumeAndLifecycleThroughSharedLibrary) {
     const semi_handle_t pause = semi_player_pause();
     const semi_handle_t final_seek =
         semi_player_seek(2'000'000, SEMI_SEEK_MODE_PREVIOUS_KEYFRAME);
+    const semi_handle_t accurate_seek =
+        semi_player_seek(2'000'000, SEMI_SEEK_MODE_ACCURATE);
     const semi_handle_t resume = semi_player_play();
     await_ok(first_seek);
     await_ok(second_seek);
     await_ok(pause);
     await_ok(final_seek);
+    await_ok(accurate_seek);
     await_ok(resume);
     ASSERT_TRUE(wait_for_event(SEMI_PLAYER_EVENT_PLAYBACK_FINISHED,
                                std::chrono::seconds(5)));

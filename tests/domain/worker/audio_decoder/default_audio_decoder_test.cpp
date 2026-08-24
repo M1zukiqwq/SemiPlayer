@@ -282,6 +282,26 @@ contracts::media::DecodedAudio make_decoded_audio(std::uint32_t samples_per_chan
     };
 }
 
+contracts::media::DecodedAudio make_seek_audio(std::int64_t pts_us,
+                                               std::initializer_list<std::uint8_t> samples) {
+    std::vector<std::byte> payload;
+    payload.reserve(samples.size());
+    for (const auto sample : samples) {
+        payload.push_back(std::byte{sample});
+    }
+    return contracts::media::DecodedAudio{
+        .format = contracts::media::AudioPcmFormat{
+            .sample_rate = 1'000,
+            .channels = 1,
+            .sample_format = contracts::media::AudioSampleFormat::U8,
+            .planar = false,
+        },
+        .samples_per_channel = static_cast<std::uint32_t>(samples.size()),
+        .planes = {std::move(payload)},
+        .pts_us = pts_us,
+    };
+}
+
 template <typename Predicate>
 bool eventually(Predicate predicate) {
     using namespace std::chrono_literals;
@@ -524,6 +544,37 @@ TEST(DefaultAudioDecoderTest, ResetsBackendAndDropsStalePacketsWhenGenerationCha
     const auto* frame = std::get_if<AudioFrame>(&*item);
     ASSERT_NE(frame, nullptr);
     EXPECT_EQ(frame->generation(), generation->current());
+}
+
+TEST(DefaultAudioDecoderTest, AccurateSeekDropsWholeFramesAndTrimsTheFirstOverlap) {
+    auto dependencies = complete_dependencies();
+    auto source = std::static_pointer_cast<FakeAudioPacketSource>(dependencies.source);
+    auto sink = std::static_pointer_cast<FakeAudioFrameSink>(dependencies.sink);
+    auto backend = std::static_pointer_cast<FakeAudioDecoderBackend>(dependencies.backend);
+    auto notifier = dependencies.notifier;
+    const auto generation = dependencies.generation->bump(2'500);
+    backend->set_decode_output(DecodedAudioBatch{make_seek_audio(0, {0, 1})});
+    source->push(make_packet_item(1, generation));
+    auto decoder = make_decoder(std::move(dependencies));
+
+    ASSERT_TRUE(decoder->configure({}).has_value());
+    ASSERT_TRUE(eventually([&backend] { return backend->decode_calls.load() == 1; }));
+    EXPECT_EQ(sink->size(), 0U);
+
+    backend->set_decode_output(DecodedAudioBatch{make_seek_audio(0, {0, 1, 2, 3})});
+    source->push(make_packet_item(2, generation));
+    ASSERT_TRUE(notifier->send(AudioQueueNotEmpty{}));
+    ASSERT_TRUE(eventually([&sink] { return sink->size() == 1; }));
+
+    auto item = sink->pop();
+    ASSERT_TRUE(item.has_value());
+    const auto* frame = std::get_if<AudioFrame>(&*item);
+    ASSERT_NE(frame, nullptr);
+    EXPECT_EQ(frame->decoded().samples_per_channel, 1U);
+    EXPECT_EQ(frame->decoded().pts_us, 3'000);
+    ASSERT_EQ(frame->decoded().planes.size(), 1U);
+    ASSERT_EQ(frame->decoded().planes.front().size(), 1U);
+    EXPECT_EQ(frame->decoded().planes.front().front(), std::byte{3});
 }
 
 TEST(DefaultAudioDecoderTest, ReportsDecodeFailureAndRequiresUnconfigureForRecovery) {

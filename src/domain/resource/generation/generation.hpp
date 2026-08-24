@@ -3,6 +3,8 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <mutex>
+#include <optional>
 
 namespace semi::infra {
 class Notifier;
@@ -27,6 +29,11 @@ class Generation {
 public:
     using Value = uint32_t;
 
+    struct Snapshot {
+        Value value = 0;
+        std::optional<std::int64_t> seek_target_pts_us;
+    };
+
     explicit Generation(std::shared_ptr<infra::Notifier> notifier = nullptr) noexcept;
     ~Generation() = default;
 
@@ -34,16 +41,24 @@ public:
     Generation& operator=(const Generation&) = delete;
 
     // 新媒体会话成功 open 后，或 seek 定位完成后推进世代号。
-    Value bump() noexcept;
+    Value bump(std::optional<std::int64_t> seek_target_pts_us = std::nullopt) noexcept;
 
     // 当前世代号。
     Value current() const noexcept;
+
+    // 返回指定世代携带的精准 seek 门限；世代已过期或不是精准 seek 时为空。
+    std::optional<std::int64_t> seek_target_for(Value generation) const noexcept;
+
+    // 编号与 seek 门限的同一时刻快照。
+    Snapshot snapshot() const noexcept;
 
     // 数据携带的 generation 是否对应当前世代（消费者使用数据前检查）。
     bool is_current(Value gen) const noexcept;
 
 private:
     std::atomic<Value> value_{0};
+    mutable std::mutex context_mutex_;
+    Snapshot context_;
     std::shared_ptr<infra::Notifier> notifier_;
 };
 

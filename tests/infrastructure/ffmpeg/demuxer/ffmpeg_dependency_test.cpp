@@ -147,7 +147,7 @@ TEST(FfmpegDemuxerBackendTest, ProbesCommittedMp4Fixture) {
     backend.close();
 }
 
-TEST(FfmpegDemuxerBackendTest, SeeksToPreviousOrNextVideoKeyframe) {
+TEST(FfmpegDemuxerBackendTest, SeeksToPreviousNextOrAccurateKeyframe) {
     semi::infra::ffmpeg::demuxer::FfmpegDemuxerBackend backend;
     const auto opened = backend.open(SEMI_PLAYER_TEST_MEDIA_PATH);
     ASSERT_TRUE(opened.has_value()) << opened.error().message;
@@ -193,5 +193,12 @@ TEST(FfmpegDemuxerBackendTest, SeeksToPreviousOrNextVideoKeyframe) {
     ASSERT_TRUE(next_pts.has_value());
     EXPECT_GE(*next_pts, target_us);
     EXPECT_LT(*previous_pts, *next_pts);
+
+    ASSERT_TRUE(backend.seek(
+        target_us,
+        semi::contracts::demuxer::SeekMode::Accurate).has_value());
+    const auto accurate_start_pts = read_next_video_pts();
+    ASSERT_TRUE(accurate_start_pts.has_value());
+    EXPECT_LE(*accurate_start_pts, target_us);
     backend.close();
 }

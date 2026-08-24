@@ -46,7 +46,7 @@ miniaudio 音频输出和音视频同步封装在动态库中，通过 C ABI 向
 - FFmpeg 媒体探测、音视频分流、解码、音频重采样和视频像素格式转换。
 - miniaudio 音频输出，以实际消费进度建立播放时钟。
 - 视频根据音频主时钟选帧，并通过只读借用回调交给宿主显示。
-- `open`、`play`、`pause`、关键帧 `seek`、`close` 和播放结束事件。
+- `open`、`play`、`pause`、关键帧/精准 `seek`、`close` 和播放结束事件。
 - C ABI 动态库与异步命令句柄，支持等待结果以及取消尚未开始的命令。
 - SDL3 示例宿主，负责窗口、输入、帧上传、画面比例和全屏切换。
 - Windows x64 便携发布包，自动收集运行库和对应的第三方许可证。
@@ -157,10 +157,10 @@ flowchart LR
 |---|---|
 | [架构设计](docs/architecture.md) | 模块边界、数据流、Generation 和命令模型的设计演进 |
 | [性能基准](docs/performance.md) | Release 基准架构、测试场景、媒体清单和结果解释 |
-| [路线图](docs/roadmap.md) | 精确 Seek、字幕、GPU、跨平台和发布改进计划 |
+| [路线图](docs/roadmap.md) | 精准 Seek 验收、字幕、GPU、跨平台和发布改进计划 |
 | [生命周期](docs/lifecycle.md) | 初始化、关闭、状态机和释放顺序 |
 | [ApiLayer](docs/modules/api_layer/api_layer.md) | 命令队列、任务状态与会话状态机 |
-| [Seek 编排](docs/modules/api_layer/seek.md) | 关键帧定位和世代号推进顺序 |
+| [Seek 编排](docs/modules/api_layer/seek.md) | 关键帧/精准定位、PTS 门限和世代号推进顺序 |
 | [音频输出](docs/modules/audio_output/audio_output.md) | 背压、实时回调和播放时钟 |
 | [视频同步](docs/modules/video_sync/video_sync.md) | 音频主时钟下的选帧策略 |
 | [C ABI 头文件](include/semi_player/semi_player.h) | 对外数据结构和函数接口 |
@@ -232,11 +232,11 @@ GitHub Actions 使用 `windows-ci` 预设和 `NullAudioOutputBackend`，避免�
 ## 当前限制与路线图
 
 - 当前只发布并持续验证 Windows x64 版本。
-- Seek 定位到相邻关键帧，尚未实现目标时间戳前的视频过滤和音频裁剪。
+- 精准 Seek 已实现 PTS 门限与音频 sample 级裁剪，仍需扩充真实媒体和连续 Seek 验收矩阵。
 - 当前视频帧经过 CPU 像素格式转换并回调宿主，尚未实现 GPU 零拷贝链路。
 - 当前不渲染字幕，播放重点是音频与视频主链路。
 - MSYS2 的完整 FFmpeg 构建包含较多可选依赖；后续可定制 FFmpeg 以缩小发布包。
-- 后续计划见 [项目路线图](docs/roadmap.md)，包括精确 Seek、字幕、GPU 零拷贝和
+- 后续计划见 [项目路线图](docs/roadmap.md)，包括精准 Seek 验收、字幕、GPU 零拷贝和
   更多平台的构建验证。
 
 ## 许可证

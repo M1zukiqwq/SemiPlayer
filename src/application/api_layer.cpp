@@ -616,7 +616,8 @@ CommandExecution execute_seek(std::int64_t position_us,
                                PlayerState current_state,
                                ApiLayer::Impl& impl) noexcept {
     const bool valid_mode = mode == contracts::demuxer::SeekMode::PreviousKeyframe ||
-                            mode == contracts::demuxer::SeekMode::NextKeyframe;
+                            mode == contracts::demuxer::SeekMode::NextKeyframe ||
+                            mode == contracts::demuxer::SeekMode::Accurate;
     if (position_us < 0 || !valid_mode || !impl.demuxer) {
         return make_failure(position_us < 0 || !valid_mode
                                 ? SEMI_ERR_INVALID_ARGUMENT

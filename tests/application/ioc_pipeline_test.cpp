@@ -187,6 +187,31 @@ TEST(IoCPipelineTest, SeekNearEndFinishesWithTheNewGeneration) {
     EXPECT_TRUE(container.dispose());
 }
 
+TEST(IoCPipelineTest, AccurateSeekNeverPresentsVideoBeforeTarget) {
+    auto& container = ioc::IoCContainer::instance();
+    auto api_layer = assemble_pipeline();
+    ASSERT_NE(api_layer, nullptr);
+
+    CommandResult result;
+    FrameObservation frames;
+    configure_frame_observation(api_layer, frames, result);
+    open_sample(api_layer, result);
+    constexpr std::int64_t target_us = 1'250'000;
+
+    const auto seek = api_layer->seek(target_us, contracts::demuxer::SeekMode::Accurate);
+    ASSERT_NE(seek, 0U);
+    ASSERT_EQ(api_layer->await(seek, result), SEMI_OK);
+    ASSERT_EQ(api_layer->await(api_layer->play(), result), SEMI_OK);
+    ASSERT_TRUE(frames.wait_for_count(1, std::chrono::seconds(3)));
+
+    const auto first_observation = frames.snapshot();
+    ASSERT_TRUE(first_observation.pts_us.has_value());
+    EXPECT_GE(*first_observation.pts_us, target_us);
+
+    ASSERT_EQ(api_layer->await(api_layer->close(), result), SEMI_OK);
+    EXPECT_TRUE(container.dispose());
+}
+
 TEST(IoCPipelineTest, SerializesRepeatedSeeksWithPauseAndResumeWhilePlaying) {
     auto& container = ioc::IoCContainer::instance();
     auto api_layer = assemble_pipeline();

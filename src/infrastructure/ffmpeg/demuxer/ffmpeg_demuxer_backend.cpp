@@ -313,7 +313,8 @@ FfmpegDemuxerBackend::seek(std::int64_t position_us, SeekMode mode) {
             .message = "seek position must not be negative",
         });
     }
-    if (mode != SeekMode::PreviousKeyframe && mode != SeekMode::NextKeyframe) {
+    if (mode != SeekMode::PreviousKeyframe && mode != SeekMode::NextKeyframe &&
+        mode != SeekMode::Accurate) {
         return std::unexpected(DemuxerBackendError{
             .operation = DemuxerBackendOperation::Seek,
             .native_code = AVERROR(EINVAL),
@@ -337,7 +338,9 @@ FfmpegDemuxerBackend::seek(std::int64_t position_us, SeekMode mode) {
         stream_index = -1;
     }
 
-    const int flags = mode == SeekMode::PreviousKeyframe ? AVSEEK_FLAG_BACKWARD : 0;
+    const int flags = mode == SeekMode::PreviousKeyframe || mode == SeekMode::Accurate
+                          ? AVSEEK_FLAG_BACKWARD
+                          : 0;
     const int status = av_seek_frame(impl_->format_context.get(), stream_index,
                                      target_timestamp, flags);
     if (status < 0) {

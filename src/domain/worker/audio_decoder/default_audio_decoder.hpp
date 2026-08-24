@@ -16,6 +16,7 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <thread>
 #include <variant>
 
@@ -131,6 +132,8 @@ private:
     // 数据面成员（后续步骤使用）：configure/unconfigure 时复位，worker 独占。
     std::deque<AudioFrameStoreItem> pending_outputs_;
     Generation::Value active_generation_ = 0;
+    std::optional<std::int64_t> seek_target_pts_us_;
+    bool seek_gate_open_ = true;
     bool input_exhausted_ = false;
     bool input_not_empty_hint_ = false;
     bool output_not_full_hint_ = false;

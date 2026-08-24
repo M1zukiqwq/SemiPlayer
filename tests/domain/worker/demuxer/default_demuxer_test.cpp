@@ -257,6 +257,21 @@ TEST(DefaultDemuxerTest, SeeksBackendAndStartsANewGeneration) {
     demuxer.close();
 }
 
+TEST(DefaultDemuxerTest, AccurateSeekPublishesItsTargetWithTheNewGeneration) {
+    auto backend = std::make_shared<FakeBackend>();
+    backend->probe.streams.push_back(audio_stream(7));
+    auto generation = std::make_shared<Generation>();
+    auto queue = std::make_shared<AudioPacketQueue>(nullptr, 4);
+    DefaultDemuxer demuxer(backend, queue, nullptr, generation);
+
+    ASSERT_TRUE(demuxer.open("movie.mp4").has_value());
+    ASSERT_TRUE(demuxer.seek(2'345'678, SeekMode::Accurate).has_value());
+
+    EXPECT_EQ(backend->last_seek_mode, SeekMode::Accurate);
+    EXPECT_EQ(generation->seek_target_for(generation->current()), 2'345'678);
+    demuxer.close();
+}
+
 TEST(DefaultDemuxerTest, RejectsNegativeSeek) {
     auto backend = std::make_shared<FakeBackend>();
     backend->probe.streams.push_back(audio_stream(7));

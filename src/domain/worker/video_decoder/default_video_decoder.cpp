@@ -200,6 +200,8 @@ void DefaultVideoDecoder::process_command(ConfigureCommand& command) noexcept {
 
     std::lock_guard lock(mutex_);
     active_generation_ = generation_->current();
+    seek_target_pts_us_ = generation_->seek_target_for(active_generation_);
+    seek_gate_open_ = !seek_target_pts_us_.has_value();
     pending_outputs_.clear();
     input_exhausted_ = false;
     input_not_empty_hint_ = true;
@@ -225,6 +227,8 @@ void DefaultVideoDecoder::process_command(UnconfigureCommand& command) noexcept 
     std::lock_guard lock(mutex_);
     pending_outputs_.clear();
     active_generation_ = 0;
+    seek_target_pts_us_.reset();
+    seek_gate_open_ = true;
     input_exhausted_ = false;
     input_not_empty_hint_ = false;
     output_not_full_hint_ = false;
@@ -255,6 +259,8 @@ bool DefaultVideoDecoder::should_process_data_locked() const noexcept {
 
 void DefaultVideoDecoder::adopt_generation_if_needed(
     Generation::Value current_generation) noexcept {
+    const auto seek_target = generation_ ? generation_->seek_target_for(current_generation)
+                                         : std::nullopt;
     bool generation_changed = false;
     {
         std::lock_guard lock(mutex_);
@@ -265,6 +271,8 @@ void DefaultVideoDecoder::adopt_generation_if_needed(
         pending_outputs_.clear();
         input_exhausted_ = false;
         active_generation_ = current_generation;
+        seek_target_pts_us_ = seek_target;
+        seek_gate_open_ = !seek_target.has_value();
         input_not_empty_hint_ = true;
         output_not_full_hint_ = false;
         generation_changed = true;
@@ -439,11 +447,18 @@ void DefaultVideoDecoder::store_decoded_outputs(
     std::lock_guard lock(mutex_);
     if (worker_state_ == WorkerState::ShuttingDown ||
         session_state_ != SessionState::Configured ||
-        active_generation_ != generation) {
+        active_generation_ != generation ||
+        (generation_ && generation_->current() != generation)) {
         return;
     }
 
     for (auto& frame : decoded) {
+        if (!seek_gate_open_) {
+            if (!frame.pts_us || *frame.pts_us < *seek_target_pts_us_) {
+                continue;
+            }
+            seek_gate_open_ = true;
+        }
         pending_outputs_.emplace_back(std::in_place_type<VideoFrame>, std::move(frame), generation);
     }
     if (append_end_of_input) {

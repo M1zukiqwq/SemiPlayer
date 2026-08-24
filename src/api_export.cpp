@@ -189,6 +189,9 @@ semi_handle_t semi_player_seek(long long position_us, semi_seek_mode_t mode) {
     case SEMI_SEEK_MODE_NEXT_KEYFRAME:
         internal_mode = semi::contracts::demuxer::SeekMode::NextKeyframe;
         break;
+    case SEMI_SEEK_MODE_ACCURATE:
+        internal_mode = semi::contracts::demuxer::SeekMode::Accurate;
+        break;
     default:
         break;
     }

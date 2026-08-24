@@ -132,6 +132,23 @@ TEST(FfmpegAudioResamplerBackendTest, ConvertsPackedS16ToPackedF32AndPreservesTi
     EXPECT_NEAR(values[3], 1.0F, 0.0001F);
 }
 
+TEST(FfmpegAudioResamplerBackendTest, AdvancesOutputPtsFromEmittedSamples) {
+    FfmpegAudioResamplerBackend backend;
+    ASSERT_TRUE(backend.configure(s16_packed(48'000, 1), f32_packed(48'000, 1)).has_value());
+
+    const auto first = backend.resample(make_s16_packed_audio(
+        48'000, 1, 4, zero_i16_bytes(4), 1'000'000));
+    const auto second = backend.resample(make_s16_packed_audio(
+        48'000, 1, 4, zero_i16_bytes(4), 9'000'000));
+
+    ASSERT_TRUE(first.has_value()) << first.error().message;
+    ASSERT_TRUE(second.has_value()) << second.error().message;
+    ASSERT_EQ(first->size(), 1U);
+    ASSERT_EQ(second->size(), 1U);
+    EXPECT_EQ(first->front().pts_us, 1'000'000);
+    EXPECT_EQ(second->front().pts_us, 1'000'083);
+}
+
 TEST(FfmpegAudioResamplerBackendTest, ConvertsPlanarStereoToPackedStereo) {
     FfmpegAudioResamplerBackend backend;
     ASSERT_TRUE(backend.configure(s16_planar(48'000, 2), f32_packed(48'000, 2)).has_value());

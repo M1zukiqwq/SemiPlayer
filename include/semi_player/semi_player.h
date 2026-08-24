@@ -43,7 +43,9 @@ enum {
     /* Closest keyframe at or before the requested position. */
     SEMI_SEEK_MODE_PREVIOUS_KEYFRAME = 1,
     /* Closest keyframe at or after the requested position. */
-    SEMI_SEEK_MODE_NEXT_KEYFRAME = 2
+    SEMI_SEEK_MODE_NEXT_KEYFRAME = 2,
+    /* Decode from the preceding keyframe and expose media at the requested position. */
+    SEMI_SEEK_MODE_ACCURATE = 3
 };
 
 typedef struct semi_video_plane {

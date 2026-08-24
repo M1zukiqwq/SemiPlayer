@@ -279,7 +279,8 @@ void DefaultDemuxer::process_command(SeekCommand& command) noexcept {
     }
 
     const bool valid_mode = command.mode == SeekMode::PreviousKeyframe ||
-                            command.mode == SeekMode::NextKeyframe;
+                            command.mode == SeekMode::NextKeyframe ||
+                            command.mode == SeekMode::Accurate;
     if (!backend || !generation_ || command.position_us < 0 || !valid_mode) {
         command.completion.set_value(std::unexpected(DemuxerError{
             .code = DemuxerErrorCode::InvalidState,
@@ -298,7 +299,9 @@ void DefaultDemuxer::process_command(SeekCommand& command) noexcept {
         return;
     }
 
-    generation_->bump();
+    generation_->bump(command.mode == SeekMode::Accurate
+                          ? std::optional<std::int64_t>{command.position_us}
+                          : std::nullopt);
     const auto session_generation = generation_->current();
     {
         std::lock_guard lock(mutex_);
